@@ -1,0 +1,165 @@
+#!/usr/bin/env php
+<?php
+$inFiles = $_SERVER["argv"];
+
+array_shift($inFiles);
+$job = array_shift($inFiles);
+
+while (count($inFiles)) {
+    $inFile = array_shift($inFiles);
+
+    switch ($job) {
+        case "format":
+            format($inFile);
+            break;
+
+        case "export":
+            export($inFile);
+            break;
+        case "convert":
+            convert($inFile);
+            break;
+        case "cleanup":
+            cleanup($inFile);
+            break;
+        default:
+            echo "unknown job $job\n";
+            die(1);
+    }
+}
+
+function format($inFile)
+{
+    $time = (int) filemtime($inFile);
+    $infile = realpath($inFile);
+
+    $checkFile =
+        $_SERVER["HOME"] .
+        "/.cache/openscad-multi-exporter/last_format_" .
+        md5(dirname($inFile)) .
+        "_" .
+        md5(basename($inFile));
+    if (!is_file($checkFile)) {
+        if (!is_dir(dirname($checkFile))) {
+            @mkdir(dirname($checkFile), 0777, true);
+        }
+        touch($checkFile, 0);
+    }
+
+    if (filemtime($checkFile) < $time) {
+        system("openscad-format -f -i " . escapeshellarg($inFile));
+        touch($inFile, $time);
+        touch($checkFile);
+    }
+}
+
+function export($inFile)
+{
+    $code = (string) file_get_contents($inFile);
+    if (!preg_match("/\\/\\*\\*exporter/", $code)) {
+        return;
+    }
+    preg_match("/\\/\\*\\*exporter(.*?)\\*\\*\\//ms", $code, $variantCode);
+    $variants = $variantCode[1];
+    $variants = explode("\n", $variants);
+    $variants = array_filter($variants, static function ($v) {
+        return preg_match("/^\\*\\*\\*/", $v);
+    });
+    $variants = array_map(function ($v) {
+        return preg_replace("/^\\*\\*\\*(.*)$/", "$1", $v);
+    }, $variants);
+    $variants[] = "";
+    $variantCode = explode("\n***", "\n" . $variantCode[1]);
+    $exporterData = [];
+    foreach ($variantCode as $k => $variantCodePart) {
+        if ($k === 0) {
+            $exporterData[null] = $variantCodePart;
+            continue;
+        }
+        $variantCodePart = explode("\n", $variantCodePart, 2);
+
+        $exporterData[$variantCodePart[0]] = $variantCodePart[1] ?? "";
+    }
+    foreach ($variants as $variant) {
+        $outFile =
+            dirname($inFile) .
+            "/" .
+            basename($inFile, ".scad") .
+            "-export" .
+            ($variant ? "-" . $variant : "") .
+            ".scad";
+        $time = filemtime($inFile);
+        if (file_exists($outFile)) {
+            $time = max($time, filemtime($outFile));
+        }
+        if (!is_file($outFile)) {
+            touch($outFile, 0);
+        }
+        if (filemtime($outFile) >= $time) {
+            continue;
+        }
+        $outCode = preg_replace_callback(
+            "/\\/\\*\\*exporter(.*?)\\*\\*\\//ms",
+            static function ($matches) use ($exporterData, $variant) {
+                $out = $exporterData[null];
+                if ($variant === "") {
+                    return $out;
+                }
+
+                return $out . "\n" . $exporterData[$variant];
+            },
+            $code
+        );
+        file_put_contents($outFile, $outCode);
+    }
+}
+
+function convert($inFile)
+{
+    $outFile = dirname($inFile) . "/" . basename($inFile, ".scad") . ".stl";
+    if (file_exists($outFile) && filemtime($outFile) >= filemtime($inFile)) {
+        return;
+    }
+    system(
+        "openscad --enable textmetrics -o " .
+            escapeshellarg($outFile) .
+            " " .
+            escapeshellarg($inFile)
+    );
+    touch($outFile, filemtime($inFile));
+}
+function cleanup($inFile)
+{
+    $pathHash = md5($inFile);
+    $cacheFiles = glob(
+        $_SERVER["HOME"] .
+            "/.cache/openscad-multi-exporter/last_format_{$pathHash}_*"
+    );
+    $cacheFiles = array_flip($cacheFiles);
+    $files = shell_exec(
+        "find " .
+            escapeshellarg($inFile) .
+            " -name '*.scad' -not -name '*-export-*' -not -name '*-export.*' -print0"
+    );
+    $files = explode("\0", $files);
+    array_pop($files);
+
+    $files = array_map(function ($v) {
+        $v = realpath($v);
+        return $_SERVER["HOME"] .
+            "/.cache/openscad-multi-exporter/last_format_" .
+            md5(dirname($v)) .
+            "_" .
+            md5(basename($v));
+    }, $files);
+
+    foreach ($files as $file) {
+        if (isset($cacheFiles[$file])) {
+            unset($cacheFiles[$file]);
+        }
+    }
+    foreach ($cacheFiles as $file => $v) {
+        unlink($file);
+    }
+}
+

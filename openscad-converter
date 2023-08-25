@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+if [[ -z "$OPENSCAD_CONVERTER_RECALLER" ]]; then
+	function checkCommandExists() {
+		command -v "$1" >/dev/null 2>&1 || {
+			echo >&2 "I require $1 but it's not installed.  Aborting."
+			exit 1
+		}
+	}
+
+	checkCommandExists realpath
+	checkCommandExists xargs
+	checkCommandExists find
+	checkCommandExists openscad
+	checkCommandExists php
+	checkCommandExists openscad-format
+
+	TARGET="${1:-${OPENSCAD_CONVERTER_TARGET:-.}}"
+	test -e "$TARGET" || {
+		echo "target $TARGET does not exist"
+		exit 1
+	}
+	TARGET="$(realpath "$TARGET")"
+
+	export OPENSCAD_CONVERTER_RECALLER
+	OPENSCAD_CONVERTER_RECALLER="format"
+
+	find "$TARGET" -name '*.scad' -not -name "*-export-*" -not -name "*-export.*" -print0 | xargs -0 -n16 -P"$(nproc)" "$0"
+
+	OPENSCAD_CONVERTER_RECALLER="export"
+	find "$TARGET" -name '*.scad' -not -name "*-export-*" -not -name "*-export.*" -print0 | xargs -0 -n16 -P"$(nproc)" "$0"
+
+	OPENSCAD_CONVERTER_RECALLER="convert"
+	find "$TARGET" -name '*.scad' -print0 | xargs -0 -n1 -P"$(nproc)" "$0"
+
+	OPENSCAD_CONVERTER_RECALLER="cleanup"
+	"$0" "$TARGET"
+
+else
+
+	cd "$(dirname "$(realpath "$0")")" || exit 1
+	./worker "$OPENSCAD_CONVERTER_RECALLER" "$@"
+fi
