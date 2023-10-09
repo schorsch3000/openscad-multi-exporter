@@ -66,6 +66,8 @@ naming convention is: its the same name, but with `.stl` instead of `.scad`.
 
 This also works with the exported files from the previous step.
 
+While exporting to a `.stl` the variable `$export` is set to 1. This can be used to overwrite things like `$fn`.
+
 # usage
 just run `openscad-converter` to have it do it's thing on the current directory.
 You might want to specify a directory either by giving a parameter or by setting an ENV-var `OPENSCAD_CONVERTER_DIR`
