@@ -47,6 +47,7 @@ function format($inFile)
     }
 
     if (filemtime($checkFile) < $time) {
+
         system("openscad-format -f -i " . escapeshellarg($inFile));
         touch($inFile, $time);
         touch($checkFile);
@@ -117,9 +118,10 @@ function export($inFile)
 function convert($inFile)
 {
     $outFile = dirname($inFile) . "/" . basename($inFile, ".scad") . ".stl";
-    if (file_exists($outFile) && filemtime($outFile) >= filemtime($inFile)) {
+    if (file_exists($outFile) && filesize($outFile) && filemtime($outFile) >= filemtime($inFile)) {
         return;
     }
+    echo "converting $inFile => ".basename($outFile)."\n";
     system(
         "openscad --enable textmetrics -o " .
             escapeshellarg($outFile) .
@@ -127,6 +129,9 @@ function convert($inFile)
             escapeshellarg($inFile)
     );
     touch($outFile, filemtime($inFile));
+    if(!filesize($outFile)){
+        unlink($outFile);
+    }
 }
 function cleanup($inFile)
 {
